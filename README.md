@@ -20,7 +20,9 @@ Telegram-бот для ежедневной записи настроения, �
 ├── requirements.txt    # Список зависимостей
 └── README.md           # Документация
 ```
-![Схема базы данных](DrawSQL.jpg)
+<p align="center">
+  <img src="DrawSQL.jpg" alt="Схема базы данных" width="700"/>
+</p>
 
 ## 🚀 Запуск
 
