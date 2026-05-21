@@ -2,8 +2,12 @@ from telebot import types
 
 def main():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+
     kb.add("➕ Записать день", "📊 Статистика")
-    kb.add("📜 История", "🧹 Очистить данные", "👩‍💻 Помощь")
+    kb.add("📜 История", "📉 График")
+    kb.add("🔍 Мои инсайты", "🧹 Очистить данные")
+    kb.add("👩‍💻 Помощь")
+
     return kb
 
 def mood():
