@@ -3,223 +3,155 @@ import db
 import keyboards
 import stats_logic
 
-state = {}
-
-def is_step(uid, step_name):
-    if uid not in state:
-        return False
-    return state[uid].get("step") == step_name
+users = {}
 
 def register_handlers(bot):
 
-    def get_stats_text(recs, days):
-        if not recs:
-            return "Мало данных!"
-        cnt = len(recs)
-        sm = 0
-        sw = 0
-        ss = 0
-        for r in recs:
-            sm += r.get("mood", 0)
-            sw += r.get("work_hours", 0)
-            ss += r.get("sleep_hours", 0)
-        am = sm / cnt
-        aw = sw / cnt
-        a_s = ss / cnt
-        out = "Среднее (" + str(days) + " дн):\n"
-        out += "Настроение: " + str(round(am, 1)) + "\n"
-        out += "Работа: " + str(round(aw, 1)) + "ч\n"
-        out += "Сон: " + str(round(a_s, 1)) + "ч"
-        return out
-
-    def save_input(msg, key, next_step, prompt, kb):
-        uid = msg.chat.id
-        try:
-            clean = msg.text.replace(",", ".")
-            num = float(clean)
-        except ValueError:
-            return
-        state[uid][key] = num
-        state[uid]["step"] = next_step
-        bot.send_message(uid, prompt, reply_markup=kb)
-
-    def finish_record(msg, comment):
-        uid = msg.chat.id
-        d = state[uid]
-        today = date.today().isoformat()
-        m_val = d.get("mood")
-        w_val = d.get("work")
-        s_val = d.get("sleep")
-        db.add_record(uid, today, m_val, w_val, s_val, comment)
-        del state[uid]
-        kb = keyboards.main()
-        bot.send_message(uid, "Сохранено.", reply_markup=kb)
-
-    @bot.message_handler(commands=["start"])
-    def cmd_start(msg):
-        kb = keyboards.main()
-        bot.send_message(msg.chat.id, "Меню:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda m: m.text == "➕ Записать день")
-    def cmd_record(msg):
-        uid = msg.chat.id
-        has = db.has_today_record(uid)
-        if has:
-            kb = keyboards.main()
-            bot.send_message(uid, "Уже есть запись.", reply_markup=kb)
-            return
-        state[uid] = {"step": "mood"}
-        kb = keyboards.mood()
-        bot.send_message(uid, "Оцени свое настроение сегодня от 1 до 5, где 1 — ужасно, 5 — отлично.", reply_markup=kb)
-
-    @bot.message_handler(func=lambda m: m.text == "📊 Статистика")
-    def cmd_stats(msg):
-        kb = keyboards.stats()
-        bot.send_message(msg.chat.id, "Выбери:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda m: m.text == "Назад")
-    def cmd_back(msg):
-        kb = keyboards.main()
-        bot.send_message(msg.chat.id, "Меню:", reply_markup=kb)
-
-    @bot.message_handler(func=lambda m: m.text == "📜 История")
-    def cmd_history(msg):
-        uid = msg.chat.id
-        recs = db.get_records(uid, 365)
-        if not recs:
-            kb = keyboards.main()
-            bot.send_message(uid, "Пусто.", reply_markup=kb)
-            return
-        out = "📜 История:\n"
-        for r in recs[-5:]:
-            d = r.get("date")
-            m_val = r.get("mood")
-            w_val = r.get("work_hours")
-            s_val = r.get("sleep_hours")
-            out += str(d) + " | "
-            out += str(m_val) + " | "
-            out += str(w_val) + "ч | "
-            out += str(s_val) + "ч\n"
-        kb = keyboards.main()
-        bot.send_message(uid, out, reply_markup=kb)
-
-    @bot.message_handler(func=lambda m: m.text == "🧹 Очистить данные")
-    def cmd_clear(msg):
-        kb = keyboards.clear()
-        bot.send_message(msg.chat.id, "Удалить всё?", reply_markup=kb)
-
-    @bot.message_handler(func=lambda m: m.text == "👩‍💻 Помощь")
-    def cmd_help(msg):
-        txt = "➕ Записать день\n"
-        txt += "📊 Статистика\n"
-        txt += "📜 История\n"
-        txt += "🧹 Очистить данные"
-        bot.send_message(msg.chat.id, txt)
-
-    @bot.message_handler(func=lambda m: is_step(m.chat.id, "mood"))
-    def step_mood(msg):
-        first_char = msg.text[0]
-        try:
-            val = int(first_char)
-        except ValueError:
-            return
+    @bot.message_handler(content_types=['text'])
+    def handle_text(message):
+        chat_id = message.chat.id
+        text = message.text
         
-        if 1 <= val <= 5:
-            uid = msg.chat.id
-            state[uid]["mood"] = val
-            state[uid]["step"] = "work"
-            kb = keyboards.work()
-            bot.send_message(uid, "Сколько часов ты потратил на полезную работу/учебу?", reply_markup=kb)
+        if text == '/start' or text == 'Назад':
+            bot.send_message(chat_id, 'Меню:', reply_markup=keyboards.main())
 
-    @bot.message_handler(func=lambda m: is_step(m.chat.id, "work"))
-    def step_work(msg):
-        save_input(msg, "work", "sleep", "Сколько часов ты спал?", keyboards.sleep())
+        elif text == '➕ Записать день':
+            if db.has_today_record(chat_id):
+                bot.send_message(chat_id, 'Уже есть.', reply_markup=keyboards.main())
+                return
+            users[chat_id] = {'step': 'mood'}
+            bot.send_message(chat_id, 'Настроение (1-5):', reply_markup=keyboards.mood())
 
-    @bot.message_handler(func=lambda m: is_step(m.chat.id, "work_in"))
-    def step_work_in(msg):
-        save_input(msg, "work", "sleep", "Сколько часов ты спал?", keyboards.sleep())
+        elif text == '📊 Статистика':
+            bot.send_message(chat_id, 'Выбери:', reply_markup=keyboards.stats())
 
-    @bot.message_handler(func=lambda m: is_step(m.chat.id, "sleep"))
-    def step_sleep(msg):
-        save_input(msg, "sleep", "comment", "Хочешь добавить комментарий?", keyboards.comment())
+        elif text == '📜 История':
+            recs = db.get_records(chat_id, 365)
+            if not recs:
+                bot.send_message(chat_id, 'Пусто.', reply_markup=keyboards.main())
+                return
+            msg = 'История:\n'
+            for r in recs[-5:]:
+                msg += f"{r['date']} | {r['mood']} | {r['work_hours']}ч | {r['sleep_hours']}ч\n"
+            bot.send_message(chat_id, msg, reply_markup=keyboards.main())
 
-    @bot.message_handler(func=lambda m: is_step(m.chat.id, "sleep_in"))
-    def step_sleep_in(msg):
-        save_input(msg, "sleep", "comment", "Хочешь добавить комментарий?", keyboards.comment())
+        elif text == '🧹 Очистить данные':
+            kb = keyboards.clear()
+            bot.send_message(chat_id, 'Удалить всё?', reply_markup=kb)
 
-    @bot.message_handler(func=lambda m: is_step(m.chat.id, "comment"))
-    def step_comment(msg):
-        finish_record(msg, msg.text)
+        elif text == '👩‍💻 Помощь':
+            msg = '/start - меню\n'
+            msg += 'Записать день - ввод\n'
+            msg += 'Статистика - отчет\n'
+            msg += 'История - записи\n'
+            msg += 'Очистить - удалить'
+            bot.send_message(chat_id, msg)
 
-    @bot.message_handler(func=lambda m: m.text == "Пропустить")
-    def step_skip(msg):
-        uid = msg.chat.id
-        if is_step(uid, "comment"):
-            finish_record(msg, "")
 
-    @bot.message_handler(func=lambda m: m.text == "Другое")
-    def step_other(msg):
-        uid = msg.chat.id
-        if uid not in state:
-            return
-        cur = state[uid].get("step")
-        if cur == "work":
-            state[uid]["step"] = "work_in"
-        elif cur == "sleep":
-            state[uid]["step"] = "sleep_in"
-        bot.send_message(uid, "Пиши число:")
+        elif chat_id in users:
+            step = users[chat_id]['step']
 
-    @bot.message_handler(func=lambda m: m.text == "За неделю")
-    def stat_week(msg):
-        uid = msg.chat.id
-        recs = db.get_records(uid, 7)
-        text = get_stats_text(recs, 7)
-        kb = keyboards.stats()
-        bot.send_message(uid, text, reply_markup=kb)
+            if step == 'mood':
+                try:
+                    val = int(text[0])
+                    if 1 <= val <= 5:
+                        users[chat_id]['mood'] = val
+                        users[chat_id]['step'] = 'work'
+                        bot.send_message(chat_id, 'Часов работы:', reply_markup=keyboards.work())
+                except:
+                    pass
 
-    @bot.message_handler(func=lambda m: m.text == "За месяц")
-    def stat_month(msg):
-        uid = msg.chat.id
-        recs = db.get_records(uid, 30)
-        text = get_stats_text(recs, 30)
-        kb = keyboards.stats()
-        bot.send_message(uid, text, reply_markup=kb)
+            elif step == 'work' or step == 'work_in':
+                try:
+                    hours = float(text.replace(',', '.'))
+                    users[chat_id]['work'] = hours
+                    users[chat_id]['step'] = 'sleep'
+                    bot.send_message(chat_id, 'Часов сна:', reply_markup=keyboards.sleep())
+                except:
+                    pass
 
-    @bot.message_handler(func=lambda m: m.text == "Мои инсайты")
-    def stat_insight(msg):
-        uid = msg.chat.id
-        recs = db.get_records(uid, 365)
-        if not recs:
-            kb = keyboards.stats()
-            bot.send_message(uid, "Мало данных!", reply_markup=kb)
-            return
-        kb = keyboards.stats()
-        txt = stats_logic.get_insights(recs)
-        bot.send_message(uid, txt, reply_markup=kb)
+            elif step == 'sleep' or step == 'sleep_in':
+                try:
+                    hours = float(text.replace(',', '.'))
+                    users[chat_id]['sleep'] = hours
+                    users[chat_id]['step'] = 'comment'
+                    bot.send_message(chat_id, 'Комментарий?', reply_markup=keyboards.comment())
+                except:
+                    pass
 
-    @bot.message_handler(func=lambda m: m.text == "График")
-    def stat_chart(msg):
-        uid = msg.chat.id
-        recs = db.get_records(uid, 365)
-        if not recs:
-            kb = keyboards.stats()
-            bot.send_message(uid, "Мало данных!", reply_markup=kb)
-            return
-        fname = "chart.png"
-        stats_logic.create_chart(recs, fname)
-        with open(fname, "rb") as f:
-            bot.send_photo(uid, f)
-        kb = keyboards.stats()
-        bot.send_message(uid, reply_markup=kb)
+            elif step == 'comment':
+                data = users[chat_id]
+                db.add_record(chat_id, date.today().isoformat(), data['mood'], data['work'], data['sleep'], text)
+                del users[chat_id]
+                bot.send_message(chat_id, 'Сохранено.', reply_markup=keyboards.main())
 
-    @bot.message_handler(func=lambda m: m.text == "Да")
-    def clear_yes(msg):
-        uid = msg.chat.id
-        db.clear_data(uid)
-        kb = keyboards.main()
-        bot.send_message(uid, "Удалено.", reply_markup=kb)
+        elif text == 'Другое':
+            if chat_id in users:
+                if users[chat_id]['step'] == 'work':
+                    users[chat_id]['step'] = 'work_in'
+                elif users[chat_id]['step'] == 'sleep':
+                    users[chat_id]['step'] = 'sleep_in'
+                bot.send_message(chat_id, 'Пиши число:')
 
-    @bot.message_handler(func=lambda m: m.text == "Нет")
-    def clear_no(msg):
-        kb = keyboards.main()
-        bot.send_message(msg.chat.id, "Отмена", reply_markup=kb)
+        elif text == 'Пропустить':
+            if chat_id in users and users[chat_id]['step'] == 'comment':
+                data = users[chat_id]
+                db.add_record(chat_id, date.today().isoformat(), data['mood'], data['work'], data['sleep'], '')
+                del users[chat_id]
+                bot.send_message(chat_id, 'Сохранено.', reply_markup=keyboards.main())
+
+    @bot.callback_query_handler(func=lambda call: True)
+    def handle_callback(call):
+        chat_id = call.message.chat.id
+        data = call.data
+
+        if data == 'st_7':
+            recs = db.get_records(chat_id, 7)
+            if not recs:
+                bot.answer_callback_query(call.id, 'Нет')
+                return
+            cnt = len(recs)
+            m = sum(r['mood'] for r in recs) / cnt
+            w = sum(r['work_hours'] for r in recs) / cnt
+            s = sum(r['sleep_hours'] for r in recs) / cnt
+            msg = f'За неделю:\nНастр: {m:.1f}\nРаб: {w:.1f}ч\nСон: {s:.1f}ч'
+            bot.send_message(chat_id, msg, reply_markup=keyboards.stats())
+
+        elif data == 'st_30':
+            recs = db.get_records(chat_id, 30)
+            if not recs:
+                bot.answer_callback_query(call.id, 'Нет')
+                return
+            cnt = len(recs)
+            m = sum(r['mood'] for r in recs) / cnt
+            w = sum(r['work_hours'] for r in recs) / cnt
+            s = sum(r['sleep_hours'] for r in recs) / cnt
+            msg = f'За месяц:\nНастр: {m:.1f}\nРаб: {w:.1f}ч\nСон: {s:.1f}ч'
+            bot.send_message(chat_id, msg, reply_markup=keyboards.stats())
+
+        elif data == 'st_ins':
+            recs = db.get_records(chat_id, 365)
+            if not recs:
+                bot.answer_callback_query(call.id, 'Нет')
+                return
+            bot.send_message(chat_id, stats_logic.get_insights(recs), reply_markup=keyboards.stats())
+
+        elif data == 'st_chart':
+            recs = db.get_records(chat_id, 365)
+            if not recs:
+                bot.answer_callback_query(call.id, 'Нет')
+                return
+            fname = 'chart.png'
+            stats_logic.create_chart(recs, fname)
+            with open(fname, 'rb') as f:
+                bot.send_photo(chat_id, f, caption='График')
+            bot.send_message(chat_id, 'Выбери:', reply_markup=keyboards.stats())
+
+        elif data == 'cl_y':
+            db.clear_data(chat_id)
+            bot.send_message(chat_id, 'Удалено.', reply_markup=keyboards.main())
+
+        elif data == 'cl_n':
+            bot.send_message(chat_id, 'Отмена', reply_markup=keyboards.main())
+
+        bot.answer_callback_query(call.id)
