@@ -1,157 +1,220 @@
 from datetime import date
+from enum import Enum, auto
+
 import db
 import keyboards
 import stats_logic
 
-users = {}
+class State(Enum):
+    MOOD = auto()
+    WORK = auto()
+    SLEEP = auto()
+    COMMENT = auto()
+
+fsm = {}
+
+def set_state(uid, state):
+    fsm[uid] = {"state": state}
+
+def get_state(uid):
+    return fsm.get(uid, {}).get("state")
+
+def set_data(uid, key, value):
+    fsm[uid][key] = value
+
+def clear_state(uid):
+    return fsm.pop(uid, {})
+
+def send(bot, uid, text, kb=None):
+    bot.send_message(uid, text, reply_markup=kb)
+
+def to_float(text):
+    try:
+        return float(text.replace(",", "."))
+    except:
+        return None
+
+def finish(bot, uid, comment=""):
+    data = clear_state(uid)
+
+    db.add_record(
+        uid,
+        date.today().isoformat(),
+        data.get("mood"),
+        data.get("work"),
+        data.get("sleep"),
+        comment
+    )
+
+    send(bot, uid, "Сохранено.", keyboards.main())
 
 def register_handlers(bot):
 
-    @bot.message_handler(content_types=['text'])
-    def handle_text(message):
-        chat_id = message.chat.id
-        text = message.text
-        
-        if text == '/start' or text == 'Назад':
-            bot.send_message(chat_id, 'Меню:', reply_markup=keyboards.main())
+    @bot.message_handler(commands=["start", "help"])
+    def start(msg):
+        send(bot, msg.chat.id, "Меню:", keyboards.main())
 
-        elif text == '➕ Записать день':
-            if db.has_today_record(chat_id):
-                bot.send_message(chat_id, 'Уже есть.', reply_markup=keyboards.main())
-                return
-            users[chat_id] = {'step': 'mood'}
-            bot.send_message(chat_id, 'Настроение (1-5):', reply_markup=keyboards.mood())
+    @bot.message_handler(func=lambda m: m.text == "👩‍💻 Помощь")
+    def help_handler(msg):
+        send(
+            bot,
+            msg.chat.id,
+            "/start - главное меню\n"
+            "/help - помощь\n"
+            "/record - записать день\n"
+            "/stats - статистика\n"
+            "/history - история\n"
+            "/insights - инсайты\n"
+            "/chart - график\n"
+            "/clear - очистить данные\n\n"
+        )
 
-        elif text == '📊 Статистика':
-            bot.send_message(chat_id, 'Выбери:', reply_markup=keyboards.stats())
+    @bot.message_handler(commands=["record"])
+    @bot.message_handler(func=lambda m: m.text == "➕ Записать день")
+    def record(msg):
+        uid = msg.chat.id
 
-        elif text == '📜 История':
-            recs = db.get_records(chat_id, 365)
-            if not recs:
-                bot.send_message(chat_id, 'Пусто.', reply_markup=keyboards.main())
-                return
-            msg = 'История:\n'
-            for r in recs[-5:]:
-                msg += f"{r['date']} | {r['mood']} | {r['work_hours']}ч | {r['sleep_hours']}ч\n"
-            bot.send_message(chat_id, msg, reply_markup=keyboards.main())
+        if db.has_today_record(uid):
+            return send(bot, uid, "Уже есть запись.", keyboards.main())
 
-        elif text == '🧹 Очистить данные':
-            kb = keyboards.clear()
-            bot.send_message(chat_id, 'Удалить всё?', reply_markup=kb)
+        set_state(uid, State.MOOD)
 
-        elif text == '👩‍💻 Помощь':
-            msg = '/start - меню\n'
-            msg += 'Записать день - ввод\n'
-            msg += 'Статистика - отчет\n'
-            msg += 'История - записи\n'
-            msg += 'Очистить - удалить'
-            bot.send_message(chat_id, msg)
+        send(bot, uid, "Настроение (1-5):", keyboards.mood())
 
+    @bot.message_handler(func=lambda m: get_state(m.chat.id) == State.MOOD)
+    def mood(msg):
+        uid = msg.chat.id
 
-        elif chat_id in users:
-            step = users[chat_id]['step']
+        if not msg.text:
+            return
 
-            if step == 'mood':
-                try:
-                    val = int(text[0])
-                    if 1 <= val <= 5:
-                        users[chat_id]['mood'] = val
-                        users[chat_id]['step'] = 'work'
-                        bot.send_message(chat_id, 'Часов работы:', reply_markup=keyboards.work())
-                except:
-                    pass
+        value = msg.text[0]
 
-            elif step == 'work' or step == 'work_in':
-                try:
-                    hours = float(text.replace(',', '.'))
-                    users[chat_id]['work'] = hours
-                    users[chat_id]['step'] = 'sleep'
-                    bot.send_message(chat_id, 'Часов сна:', reply_markup=keyboards.sleep())
-                except:
-                    pass
+        if not value.isdigit():
+            return
 
-            elif step == 'sleep' or step == 'sleep_in':
-                try:
-                    hours = float(text.replace(',', '.'))
-                    users[chat_id]['sleep'] = hours
-                    users[chat_id]['step'] = 'comment'
-                    bot.send_message(chat_id, 'Комментарий?', reply_markup=keyboards.comment())
-                except:
-                    pass
+        mood = int(value)
 
-            elif step == 'comment':
-                data = users[chat_id]
-                db.add_record(chat_id, date.today().isoformat(), data['mood'], data['work'], data['sleep'], text)
-                del users[chat_id]
-                bot.send_message(chat_id, 'Сохранено.', reply_markup=keyboards.main())
+        if mood not in range(1, 6):
+            return
 
-        elif text == 'Другое':
-            if chat_id in users:
-                if users[chat_id]['step'] == 'work':
-                    users[chat_id]['step'] = 'work_in'
-                elif users[chat_id]['step'] == 'sleep':
-                    users[chat_id]['step'] = 'sleep_in'
-                bot.send_message(chat_id, 'Пиши число:')
+        set_data(uid, "mood", mood)
+        set_data(uid, "state", State.WORK)
 
-        elif text == 'Пропустить':
-            if chat_id in users and users[chat_id]['step'] == 'comment':
-                data = users[chat_id]
-                db.add_record(chat_id, date.today().isoformat(), data['mood'], data['work'], data['sleep'], '')
-                del users[chat_id]
-                bot.send_message(chat_id, 'Сохранено.', reply_markup=keyboards.main())
+        send(bot, uid, "Часов работы?", keyboards.work())
 
-    @bot.callback_query_handler(func=lambda call: True)
-    def handle_callback(call):
-        chat_id = call.message.chat.id
-        data = call.data
+    @bot.message_handler(func=lambda m: get_state(m.chat.id) == State.WORK)
+    def work(msg):
+        uid = msg.chat.id
 
-        if data == 'st_7':
-            recs = db.get_records(chat_id, 7)
-            if not recs:
-                bot.answer_callback_query(call.id, 'Нет')
-                return
-            cnt = len(recs)
-            m = sum(r['mood'] for r in recs) / cnt
-            w = sum(r['work_hours'] for r in recs) / cnt
-            s = sum(r['sleep_hours'] for r in recs) / cnt
-            msg = f'За неделю:\nНастр: {m:.1f}\nРаб: {w:.1f}ч\nСон: {s:.1f}ч'
-            bot.send_message(chat_id, msg, reply_markup=keyboards.stats())
+        value = to_float(msg.text)
 
-        elif data == 'st_30':
-            recs = db.get_records(chat_id, 30)
-            if not recs:
-                bot.answer_callback_query(call.id, 'Нет')
-                return
-            cnt = len(recs)
-            m = sum(r['mood'] for r in recs) / cnt
-            w = sum(r['work_hours'] for r in recs) / cnt
-            s = sum(r['sleep_hours'] for r in recs) / cnt
-            msg = f'За месяц:\nНастр: {m:.1f}\nРаб: {w:.1f}ч\nСон: {s:.1f}ч'
-            bot.send_message(chat_id, msg, reply_markup=keyboards.stats())
+        if value is None:
+            return
 
-        elif data == 'st_ins':
-            recs = db.get_records(chat_id, 365)
-            if not recs:
-                bot.answer_callback_query(call.id, 'Нет')
-                return
-            bot.send_message(chat_id, stats_logic.get_insights(recs), reply_markup=keyboards.stats())
+        set_data(uid, "work", value)
+        set_data(uid, "state", State.SLEEP)
 
-        elif data == 'st_chart':
-            recs = db.get_records(chat_id, 365)
-            if not recs:
-                bot.answer_callback_query(call.id, 'Нет')
-                return
-            fname = 'chart.png'
-            stats_logic.create_chart(recs, fname)
-            with open(fname, 'rb') as f:
-                bot.send_photo(chat_id, f, caption='График')
-            bot.send_message(chat_id, 'Выбери:', reply_markup=keyboards.stats())
+        send(bot, uid, "Часов сна?", keyboards.sleep())
 
-        elif data == 'cl_y':
-            db.clear_data(chat_id)
-            bot.send_message(chat_id, 'Удалено.', reply_markup=keyboards.main())
+    @bot.message_handler(func=lambda m: get_state(m.chat.id) == State.SLEEP)
+    def sleep(msg):
+        uid = msg.chat.id
 
-        elif data == 'cl_n':
-            bot.send_message(chat_id, 'Отмена', reply_markup=keyboards.main())
+        value = to_float(msg.text)
 
-        bot.answer_callback_query(call.id)
+        if value is None:
+            return
+
+        set_data(uid, "sleep", value)
+        set_data(uid, "state", State.COMMENT)
+
+        send(bot, uid, "Комментарий?", keyboards.comment())
+
+    @bot.message_handler(func=lambda m: get_state(m.chat.id) == State.COMMENT)
+    def comment(msg):
+        text = "" if msg.text == "Пропустить" else msg.text
+        finish(bot, msg.chat.id, text)
+
+    @bot.message_handler(commands=["stats"])
+    @bot.message_handler(func=lambda m: m.text == "📊 Статистика")
+    def stats(msg):
+        uid = msg.chat.id
+        recs = db.get_records(uid, 3650)
+
+        if not recs:
+            return send(bot, uid, "Нет данных.", keyboards.main())
+
+        n = len(recs)
+
+        text = (
+            "Среднее:\n"
+            f"Настроение: {sum(r['mood'] for r in recs)/n:.1f}\n"
+            f"Работа: {sum(r['work_hours'] for r in recs)/n:.1f}ч\n"
+            f"Сон: {sum(r['sleep_hours'] for r in recs)/n:.1f}ч"
+        )
+
+        send(bot, uid, text, keyboards.main())
+
+    @bot.message_handler(commands=["history"])
+    @bot.message_handler(func=lambda m: m.text == "📜 История")
+    def history(msg):
+        uid = msg.chat.id
+        recs = db.get_records(uid, 365)
+
+        if not recs:
+            return send(bot, uid, "История пуста.", keyboards.main())
+
+        text = "📜 История:\n"
+
+        for r in recs[-5:]:
+            text += (
+                f"{r['date']} | "
+                f"{r['mood']} | "
+                f"{r['work_hours']}ч | "
+                f"{r['sleep_hours']}ч\n"
+            )
+
+        send(bot, uid, text, keyboards.main())
+
+    @bot.message_handler(commands=["insights"])
+    @bot.message_handler(func=lambda m: m.text == "🔍 Мои инсайты")
+    def insights(msg):
+        uid = msg.chat.id
+        recs = db.get_records(uid, 365)
+
+        text = "Мало данных!" if not recs else stats_logic.get_insights(recs)
+
+        send(bot, uid, text, keyboards.main())
+
+    @bot.message_handler(commands=["chart"])
+    @bot.message_handler(func=lambda m: m.text == "📉 График")
+    def chart(msg):
+        uid = msg.chat.id
+        recs = db.get_records(uid, 365)
+
+        if not recs:
+            return send(bot, uid, "Мало данных!", keyboards.main())
+
+        filename = f"chart_{uid}.png"
+
+        stats_logic.create_chart(recs, filename)
+
+        with open(filename, "rb") as file:
+            bot.send_photo(uid, file)
+
+        send(bot, uid, "Готово.", keyboards.main())
+
+    @bot.message_handler(commands=["clear"])
+    @bot.message_handler(func=lambda m: m.text == "🧹 Очистить данные")
+    def clear(msg):
+        send(bot, msg.chat.id, "Удалить всё?", keyboards.clear())
+
+    @bot.message_handler(func=lambda m: m.text == "Да")
+    def clear_yes(msg):
+        db.clear_data(msg.chat.id)
+        send(bot, msg.chat.id, "Удалено.", keyboards.main())
+
+    @bot.message_handler(func=lambda m: m.text == "Нет")
+    def clear_no(msg):
+        send(bot, msg.chat.id, "Отмена.", keyboards.main())
