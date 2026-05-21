@@ -7,50 +7,49 @@ def get_insights(records):
 
     df = pd.DataFrame(records)
 
-    avg_mood = df["mood"].mean()
-    avg_work = df["work_hours"].mean()
-    avg_sleep = df["sleep_hours"].mean()
+    mood = round(df["mood"].mean(), 1)
+    work = round(df["work_hours"].mean(), 1)
+    sleep = round(df["sleep_hours"].mean(), 1)
 
-    sleep_good = df[df["sleep_hours"] >= 7.5]["mood"].mean()
-    sleep_bad = df[df["sleep_hours"] < 7.5]["mood"].mean()
+    sleep_msg = (
+        "Сон > 7.5ч улучшает настрой."
+        if df[df["sleep_hours"] >= 7.5]["mood"].mean()
+        > df[df["sleep_hours"] < 7.5]["mood"].mean()
+        else "Сон не влияет."
+    )
 
-    if sleep_good > sleep_bad:
-        sleep_msg = "Сон > 7.5ч улучшает настрой."
-    else:
-        sleep_msg = "Сон не влияет."
+    work_msg = (
+        "Работа > 4ч снижает настрой."
+        if df[df["work_hours"] < 4]["mood"].mean()
+        > df[df["work_hours"] >= 4]["mood"].mean()
+        else "Работа ок."
+    )
 
-    work_low = df[df["work_hours"] < 4]["mood"].mean()
-    work_high = df[df["work_hours"] >= 4]["mood"].mean()
-
-    if work_low > work_high:
-        work_msg = "Работа > 4ч снижает настрой."
-    else:
-        work_msg = "Работа ок."
-
-    text = "Среднее:\n"
-    text += "Настроение: " + str(round(avg_mood, 1)) + "\n"
-    text += "Работа: " + str(round(avg_work, 1)) + "ч\n"
-    text += "Сон: " + str(round(avg_sleep, 1)) + "ч\n\n"
-    text += sleep_msg + "\n"
-    text += work_msg
-
-    return text
+    return (
+        "Среднее:\n"
+        f"Настроение: {mood}\n"
+        f"Работа: {work}ч\n"
+        f"Сон: {sleep}ч\n\n"
+        f"{sleep_msg}\n"
+        f"{work_msg}"
+    )
 
 def create_chart(records, filename):
+    if not records:
+        return
+
     df = pd.DataFrame(records)
 
-    if df.empty:
-        return None
-
     plt.figure()
-    plt.plot(df["date"], df["mood"], "o-", label="Настроение")
-    plt.plot(df["date"], df["work_hours"], "s--", label="Работа")
-    plt.plot(df["date"], df["sleep_hours"], "^-", label="Сон")
+
+    plt.plot(df["date"], df["mood"], label="Настроение")
+    plt.plot(df["date"], df["work_hours"], label="Работа")
+    plt.plot(df["date"], df["sleep_hours"], label="Сон")
+
     plt.legend()
-    plt.grid(True)
+    plt.grid()
     plt.xticks(rotation=45)
+
     plt.tight_layout()
     plt.savefig(filename)
     plt.close()
-
-    return filename
