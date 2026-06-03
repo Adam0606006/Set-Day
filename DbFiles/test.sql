@@ -1,11 +1,6 @@
-INSERT INTO records (
-    user_id,
-    date,
-    mood,
-    work_hours,
-    sleep_hours,
-    comment
-) VALUES
+INSERT INTO records
+(user_id, date, mood, work_hours, sleep_hours, comment)
+VALUES
 (1, '2026-05-25', 4, 6, 8, 'Имба'),
 (1, '2026-05-26', 5, 4, 8, 'Все плохо'),
 (1, '2026-05-27', 3, 8, 6, 'Лям 200'),
