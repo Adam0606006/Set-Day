@@ -77,3 +77,18 @@ def clear_data(uid):
             WHERE user_id = ?
         """, (uid,))
         conn.commit()
+
+def clear_data(uid):
+    with connect() as conn:
+        conn.execute("""
+            DELETE FROM records
+            WHERE user_id = ?
+        """, (uid,))
+        conn.commit()
+
+
+def load_test_data():
+    with connect() as conn:
+        with open("test.sql", "r", encoding="utf-8") as file:
+            conn.executescript(file.read())
+        conn.commit()
